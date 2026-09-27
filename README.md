@@ -6,7 +6,7 @@ Drop a `state_dict` file and instantly see layers, neurons, weights, biases, and
 
 ![overview](screenshots/01-overview.png)
 
-## GitHub Description (copy-paste into About)
+
 
 ```
 NeuralViz — Single-file, offline visualizer for PyTorch .pth checkpoints. Drag & drop a state_dict in your browser to explore layers, weights & biases and watch activations propagate. No install, no server, 100% private.
