@@ -25,7 +25,7 @@ h3{font-size:14px;margin:0 0 4px}h4{margin:12px 0 4px;font-size:12px;color:var(-
 <button class="s" id="run">Run ▸</button><button class="s" id="clearRun">Clear</button>
 <span id="st">Drop a PyTorch checkpoint anywhere on the page.</span></header>
 <main><div id="wrap"><canvas id="cv"></canvas><div id="empty">Drop a .pth file here<br>(torch.save of a state_dict, PyTorch ≥ 1.6)<br>or click “Load demo”.</div></div>
-<aside><div id="info"></div><h4>Tensors</h4><div id="list" class="mu">—</div></aside></main>
+<aside><div id="info"></div><h4>Run I/O</h4><div id="io" class="mu">—</div><h4>Tensors</h4><div id="list" class="mu">—</div></aside></main>
 <script>
 const $=id=>document.getElementById(id),esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const GX=280,GY=30;let M=null,S={cols:[],all:[],edges:[],max:1,view:{x:0,y:0,k:1},hover:null,pin:null,
@@ -102,18 +102,19 @@ async function loadFile(f){
 function buildModel(sd){const cols=[];
  for(const[k,t]of sd){if(!t||!t.data||t.size.length<2||!/weight$/.test(k))continue;
   const o=t.size[0],i=t.size[1],K=t.size.slice(2).reduce((a,c)=>a*c,1),d=t.data,b=sd.get(k.replace(/weight$/,'bias'));
-  if(!cols.length||cols[cols.length-1].n!==i)cols.push({name:'input',n:i});
+  if(!cols.length)cols.push({name:'input',n:i});
+  else if(cols[cols.length-1].n!==i)cols.push({name:'flatten→'+i,n:i,gap:true});
   const bias=b&&b.data&&b.data.length===o?b.data:null;
   cols.push({name:k.replace(/\.weight$/,''),n:o,bias,bm:bias?Math.max(...bias.map(Math.abs))||1:1,W:K===1?(a,c)=>d[a*i+c]:(a,c)=>{let s=0;for(let q=0;q<K;q++)s+=d[(a*i+c)*K+q];return s/K}})}
  return cols}
 function setSD(sd,label){M=buildModel(sd);if(!M.length){status('No weight matrices (2D+ tensors) found.');return}
- $('empty').style.display='none';S.pin=S.hover=null;S.act=null;S.maxAct=null;S.litUpTo=-1;S.animLayer=null;
+ $('empty').style.display='none';S.pin=S.hover=null;S.act=null;S.maxAct=null;S.litUpTo=-1;S.animLayer=null;const io0=$('io');if(io0)io0.innerHTML='—';
  const mx=Math.max(...M.map(c=>c.n)),ne=M.reduce((a,c,l)=>a+(l&&c.W?c.n*M[l-1].n:0),0);
  $('cap').max=Math.max(96,Math.min(512,mx));$('cap').value=Math.min(mx,512);$('capv').textContent=$('cap').value;
  $('pct').value=ne<=60000?100:30;$('pctv').textContent=$('pct').value+'%';
  $('list').innerHTML=[...sd].filter(([k,v])=>v&&v.size).map(([k,v])=>{let s='';if(v.data){let mn=1/0,mx=-1/0,sm=0;for(const x of v.data){if(x<mn)mn=x;if(x>mx)mx=x;sm+=x}s=`min ${mn.toFixed(3)} · max ${mx.toFixed(3)} · mean ${(sm/v.data.length).toFixed(3)}`}
   return`<div class="r" style="display:block"><code>${esc(k)}</code> <b>[${v.size.join('×')}]</b><div class="mu">${s}</div></div>`}).join('');
- const nw=M.filter(c=>c.W).length;status(`${label}: ${nw} weight layers, ${M.reduce((a,c)=>a+c.n,0)} neurons`);rebuild(false)}
+ const nw=M.filter(c=>c.W).length,ng=M.filter(c=>c.gap).length;status(`${label}: ${nw} weight layers, ${M.reduce((a,c)=>a+c.n,0)} neurons${ng?` · ${ng} flatten gap(s) resampled`:''}`);rebuild(false)}
 function rebuild(keep){if(!M)return;const cap=+$('cap').value,pct=+$('pct').value/100;
  const cols=M.map(c=>({...c,m:Math.min(c.n,cap)})),all=[];
  for(let l=1;l<cols.length;l++){const c=cols[l];if(!c.W)continue;for(let o=0;o<c.m;o++)for(let i=0;i<cols[l-1].m;i++)all.push({l,o,i,w:c.W(o,i)})}
@@ -126,9 +127,9 @@ function computeForward(input,actName){
  acts[0]=Float32Array.from({length:S.cols[0].n},(_,i)=>i<input.length?input[i]:0);
  mx[0]=Math.max(1e-6,...acts[0].map(Math.abs));
  for(let l=1;l<S.cols.length;l++){const c=S.cols[l];
-  if(!c.W){acts[l]=acts[l-1];mx[l]=mx[l-1];continue}
+  if(!c.W){const prev=acts[l-1],t=new Float32Array(c.n);t.set(prev.subarray(0,Math.min(prev.length,c.n)));acts[l]=t;mx[l]=Math.max(1e-6,...t.map(Math.abs));continue}
   const prev=acts[l-1],iN=S.cols[l-1].n,o=c.n,out=new Float32Array(o);
-  for(let oi=0;oi<o;oi++){let s=c.bias?c.bias[oi]:0;for(let ii=0;ii<iN;ii++)s+=prev[ii]*c.W(oi,ii);out[oi]=s}
+  for(let oi=0;oi<o;oi++){let s=c.bias?c.bias[oi]:0;for(let ii=0;ii<iN;ii++){const v=ii<prev.length?prev[ii]:0;s+=v*c.W(oi,ii)}out[oi]=s}
   const last=l===S.cols.length-1;
   acts[l]=last?out:out.map(f);mx[l]=Math.max(1e-6,...acts[l].map(Math.abs))}
  return{acts,mx}}
@@ -138,12 +139,15 @@ function parseInputText(txt,n){
  return Array.from({length:n},()=>gauss()*.6)}
 function runForward(){
  if(!M||!S.cols.length){status('Load a model first.');return}
- const n=S.cols[0].n,input=parseInputText($('inp').value,n);
+ const n=S.cols[0].n,raw=$('inp').value.trim(),input=parseInputText(raw,n),used=input.slice(0,n);
  const r=computeForward(input,$('actf').value);
  S.act=r.acts;S.maxAct=r.mx;S.litUpTo=0;S.animLayer=S.cols.length>1?1:null;S.animStart=performance.now();
- status(`Forward pass: input×${n} → ${S.cols.map(c=>c.n).join('→')}`);
+ const out=[...r.acts[r.acts.length-1]],fv=(a,k)=>a.slice(0,k).map(v=>Number.isFinite(v)?v.toFixed(4):'NaN').join(', ')+(a.length>k?`, … +${a.length-k} more`:'');
+ const extra=input.length>n?` (${input.length-n} extra ignored, model takes ${n})`:'',rnd=!raw?' (random)':'';
+ status(`input×${n} [${fv(used,8)}]${rnd}${extra} → output×${out.length} [${fv(out,8)}]`);
+ const io=$('io');if(io)io.innerHTML=`<div class="r" style="display:block"><code>input [${n}]${rnd}${extra}</code><div>${esc(fv(used,16))}</div></div><div class="r" style="display:block"><code>output [${out.length}]</code><div>${esc(fv(out,16))}</div></div>`;
  if(S.animLayer)requestAnimationFrame(animStep);else{S.litUpTo=S.cols.length-1;draw()}}
-function clearRun(){S.act=null;S.maxAct=null;S.litUpTo=-1;S.animLayer=null;draw()}
+function clearRun(){S.act=null;S.maxAct=null;S.litUpTo=-1;S.animLayer=null;const io=$('io');if(io)io.innerHTML='—';draw()}
 const PULSE_MS=420,GAP_MS=110;
 function animStep(now){
  if(S.animLayer==null)return;
@@ -191,7 +195,7 @@ function info(H){const el=$('info');
  if(!H){el.innerHTML='<p class="mu">Hover a neuron to see every weight touching it (labels appear on the edges when zoomed in). Click to pin. Scroll to zoom, drag to pan. Blue = positive, red = negative; node tint = bias — or, after a run, activation.</p><p class="mu">Type an input vector (or leave blank for random) and hit <b>Run</b> to watch it propagate layer by layer.</p>';return}
  const c=S.cols[H.l],inc=S.all.filter(e=>e.l===H.l&&e.o===H.j),out=S.all.filter(e=>e.l===H.l+1&&e.i===H.j);
  const row=(t,a,f)=>`<h4>${t}</h4>`+(a.length?a.slice().sort((x,y)=>Math.abs(y.w)-Math.abs(x.w)).slice(0,8).map(e=>`<div class="r"><span>${f(e)}</span><b class="${e.w<0?'n':'p'}">${e.w.toFixed(4)}</b></div>`).join(''):'<div class="mu">none</div>');
- el.innerHTML=`<h3>${esc(c.name)} · neuron ${H.j}</h3><div class="mu">${c.bias?'bias '+c.bias[H.j].toFixed(4):'no bias'}</div>`+row(`Incoming (${inc.length}) top 8`,inc,e=>`from ${esc(S.cols[e.l-1].name)}[${e.i}]`)+row(`Outgoing (${out.length}) top 8`,out,e=>`to ${esc(S.cols[e.l].name)}[${e.o}]`)}
+ el.innerHTML=`<h3>${esc(c.name)} · neuron ${H.j}</h3><div class="mu">${c.bias?'bias '+c.bias[H.j].toFixed(4):'no bias'}${S.act&&S.act[H.l]?' · act '+(Number.isFinite(S.act[H.l][H.j])?S.act[H.l][H.j].toFixed(4):'NaN'):''}</div>`+row(`Incoming (${inc.length}) top 8`,inc,e=>`from ${esc(S.cols[e.l-1].name)}[${e.i}]`)+row(`Outgoing (${out.length}) top 8`,out,e=>`to ${esc(S.cols[e.l].name)}[${e.o}]`)}
 const refresh=()=>{info(S.pin||S.hover);draw()},status=t=>$('st').textContent=t;
 /* ---------- interaction ---------- */
 function hit(e){const r=cv.getBoundingClientRect(),v=S.view,wx=(e.clientX-r.left-v.x)/v.k,wy=(e.clientY-r.top-v.y)/v.k;
