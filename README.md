@@ -49,15 +49,12 @@ Suggested topics: `pytorch` `neural-network` `visualization` `deep-learning` `ma
 ### Option A — just open it
 ```bash
 open index.html
-# or
-python3 -m http.server 8000
-# -> http://localhost:8000
 ```
 
 ### Option B — GitHub Pages (free live demo)
 1. Push this folder to GitHub (see below)
 2. Repo Settings → Pages → Deploy from branch → `main` / `/ (root)`
-3. Open `https://<you>.github.io/NeuralViz/`
+3. Open `[https://<you>.github.io/NeuralViz/](https://basavaprabhu46.github.io/NeuralViz/)`
 
 ### Try it
 1. Click **Load demo**, then **Run ▸** to see activations propagate.
@@ -92,19 +89,7 @@ NeuralViz/
     └── 03-large-model.png    # 4-layer, 3371-neuron model, top 30% edges
 ```
 
-## Upload to GitHub
 
-```bash
-cd NeuralViz
-git init
-git add index.html README.md screenshots/
-git commit -m "Initial commit: NeuralViz single-file PTH visualizer"
-gh repo create NeuralViz --public --source=. --push
-# no gh CLI? -> create empty repo on github.com, then:
-# git remote add origin https://github.com/<you>/NeuralViz.git
-# git branch -M main
-# git push -u origin main
-```
 
 ## Roadmap ideas
 
