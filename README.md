@@ -52,9 +52,7 @@ open index.html
 ```
 
 ### Option B — GitHub Pages (free live demo)
-1. Push this folder to GitHub (see below)
-2. Repo Settings → Pages → Deploy from branch → `main` / `/ (root)`
-3. Open `[https://<you>.github.io/NeuralViz/](https://basavaprabhu46.github.io/NeuralViz/)`
+Open [https://<you>.github.io/NeuralViz/](https://basavaprabhu46.github.io/NeuralViz/)
 
 ### Try it
 1. Click **Load demo**, then **Run ▸** to see activations propagate.
