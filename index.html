@@ -195,7 +195,12 @@ function info(H){const el=$('info');
  if(!H){el.innerHTML='<p class="mu">Hover a neuron to see every weight touching it (labels appear on the edges when zoomed in). Click to pin. Scroll to zoom, drag to pan. Blue = positive, red = negative; node tint = bias — or, after a run, activation.</p><p class="mu">Type an input vector (or leave blank for random) and hit <b>Run</b> to watch it propagate layer by layer.</p>';return}
  const c=S.cols[H.l],inc=S.all.filter(e=>e.l===H.l&&e.o===H.j),out=S.all.filter(e=>e.l===H.l+1&&e.i===H.j);
  const row=(t,a,f)=>`<h4>${t}</h4>`+(a.length?a.slice().sort((x,y)=>Math.abs(y.w)-Math.abs(x.w)).slice(0,8).map(e=>`<div class="r"><span>${f(e)}</span><b class="${e.w<0?'n':'p'}">${e.w.toFixed(4)}</b></div>`).join(''):'<div class="mu">none</div>');
- el.innerHTML=`<h3>${esc(c.name)} · neuron ${H.j}</h3><div class="mu">${c.bias?'bias '+c.bias[H.j].toFixed(4):'no bias'}${S.act&&S.act[H.l]?' · act '+(Number.isFinite(S.act[H.l][H.j])?S.act[H.l][H.j].toFixed(4):'NaN'):''}</div>`+row(`Incoming (${inc.length}) top 8`,inc,e=>`from ${esc(S.cols[e.l-1].name)}[${e.i}]`)+row(`Outgoing (${out.length}) top 8`,out,e=>`to ${esc(S.cols[e.l].name)}[${e.o}]`)}
+ const hasAct=S.act&&S.act[H.l]&&H.j<S.act[H.l].length,av=hasAct?S.act[H.l][H.j]:null,
+  avTxt=hasAct?(Number.isFinite(av)?av.toFixed(4):'NaN'):null,
+  valRow=H.l===0
+   ?(avTxt!=null?`<h4>Input value</h4><div class="r"><span>received</span><b>${avTxt}</b></div>`:`<h4>Input value</h4><div class="mu">Hit Run ▸ to feed a value into this neuron.</div>`)
+   :(avTxt!=null?`<h4>Activation</h4><div class="r"><span>received</span><b>${avTxt}</b></div>`:`<h4>Activation</h4><div class="mu">Hit Run ▸ to see what flows into this neuron.</div>`);
+ el.innerHTML=`<h3>${esc(c.name)} · neuron ${H.j}</h3><div class="mu">${c.bias?'bias '+c.bias[H.j].toFixed(4):'no bias'}</div>`+valRow+row(`Incoming (${inc.length}) top 8`,inc,e=>`from ${esc(S.cols[e.l-1].name)}[${e.i}]`)+row(`Outgoing (${out.length}) top 8`,out,e=>`to ${esc(S.cols[e.l].name)}[${e.o}]`)}
 const refresh=()=>{info(S.pin||S.hover);draw()},status=t=>$('st').textContent=t;
 /* ---------- interaction ---------- */
 function hit(e){const r=cv.getBoundingClientRect(),v=S.view,wx=(e.clientX-r.left-v.x)/v.k,wy=(e.clientY-r.top-v.y)/v.k;
