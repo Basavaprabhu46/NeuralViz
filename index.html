@@ -145,7 +145,9 @@ function runForward(){
  const out=[...r.acts[r.acts.length-1]],fv=(a,k)=>a.slice(0,k).map(v=>Number.isFinite(v)?v.toFixed(4):'NaN').join(', ')+(a.length>k?`, … +${a.length-k} more`:'');
  const extra=input.length>n?` (${input.length-n} extra ignored, model takes ${n})`:'',rnd=!raw?' (random)':'';
  status(`input×${n} [${fv(used,8)}]${rnd}${extra} → output×${out.length} [${fv(out,8)}]`);
- const io=$('io');if(io)io.innerHTML=`<div class="r" style="display:block"><code>input [${n}]${rnd}${extra}</code><div>${esc(fv(used,16))}</div></div><div class="r" style="display:block"><code>output [${out.length}]</code><div>${esc(fv(out,16))}</div></div>`;
+ const vrow=(v,i)=>`<div class="r"><span>${i}</span><b class="${v<0?'n':'p'}">${Number.isFinite(v)?v.toFixed(4):'NaN'}</b></div>`,
+  vlist=(a,nm,cap)=>`<div class="r" style="display:block"><code>${esc(nm)} [${a.length}]</code></div>`+a.slice(0,cap).map((v,i)=>vrow(v,(nm.startsWith('input')?'in':'out')+`[${i}]`)).join('')+(a.length>cap?`<div class="mu">… +${a.length-cap} more</div>`:'');
+ const io=$('io');if(io)io.innerHTML=vlist(used,`input${rnd}${extra}`,64)+vlist(out,'output',64);
  if(S.animLayer)requestAnimationFrame(animStep);else{S.litUpTo=S.cols.length-1;draw()}}
 function clearRun(){S.act=null;S.maxAct=null;S.litUpTo=-1;S.animLayer=null;const io=$('io');if(io)io.innerHTML='—';draw()}
 const PULSE_MS=420,GAP_MS=110;
@@ -190,7 +192,11 @@ function draw(pulseT){const r=cv.getBoundingClientRect(),d=devicePixelRatio||1;i
   else{ctx.globalAlpha=.4;ctx.fillStyle=mu}
   ctx.fill();ctx.shadowBlur=0;ctx.globalAlpha=1;ctx.lineWidth=hi?3:1;ctx.strokeStyle=hi?ac:fg;ctx.stroke()}
   ctx.fillStyle=fg;ctx.font='bold 12px system-ui';const ty=-(c.m-1)/2*GY-30;ctx.fillText(c.name,nx(l),ty);
-  ctx.fillStyle=mu;ctx.font='11px system-ui';ctx.fillText(c.m<c.n?`showing ${c.m} of ${c.n}`:`${c.n} neurons`,nx(l),ty+14)})}
+  ctx.fillStyle=mu;ctx.font='11px system-ui';ctx.fillText(c.m<c.n?`showing ${c.m} of ${c.n}`:`${c.n} neurons`,nx(l),ty+14)})
+ if(S.act){ctx.font='10px system-ui';const L=S.cols.length-1,vf=(l,j)=>{const a=S.act[l]&&j<S.act[l].length?S.act[l][j]:null;return a==null?'–':(Number.isFinite(a)?a.toFixed(3):'NaN')};
+  for(let j=0;j<S.cols[0].m;j++){ctx.fillStyle=fg;ctx.textAlign='right';ctx.fillText(vf(0,j),nx(0)-R-5,ny(0,j)+3)}
+  if(L>0)for(let j=0;j<S.cols[L].m;j++){ctx.fillStyle=fg;ctx.textAlign='left';ctx.fillText(vf(L,j),nx(L)+R+5,ny(L,j)+3)}}
+}
 function info(H){const el=$('info');
  if(!H){el.innerHTML='<p class="mu">Hover a neuron to see every weight touching it (labels appear on the edges when zoomed in). Click to pin. Scroll to zoom, drag to pan. Blue = positive, red = negative; node tint = bias — or, after a run, activation.</p><p class="mu">Type an input vector (or leave blank for random) and hit <b>Run</b> to watch it propagate layer by layer.</p>';return}
  const c=S.cols[H.l],inc=S.all.filter(e=>e.l===H.l&&e.o===H.j),out=S.all.filter(e=>e.l===H.l+1&&e.i===H.j);
