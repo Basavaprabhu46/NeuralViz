@@ -1,3 +1,5 @@
+![NeuralViz — single-file visualizer for PyTorch checkpoints](assets/social-preview.png)
+
 # NeuralViz
 
 Zero-dependency, single-file visualizer for PyTorch `.pth` checkpoints — right in your browser.
