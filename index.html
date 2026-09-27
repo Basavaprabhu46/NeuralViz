@@ -1,0 +1,215 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PTH Neural Network Visualizer</title>
+<style>
+:root{--bg:#fafaf7;--panel:#fff;--fg:#1c1c1a;--muted:#6b6b66;--line:#dcdcd4;--pos:#2563eb;--neg:#dc2626;--acc:#d97706}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#121214;--panel:#1b1b1f;--fg:#ececea;--muted:#9a9a94;--line:#2e2e34;--pos:#5b9dff;--neg:#ff6b6b;--acc:#fbbf24}}
+:root[data-theme="dark"]{--bg:#121214;--panel:#1b1b1f;--fg:#ececea;--muted:#9a9a94;--line:#2e2e34;--pos:#5b9dff;--neg:#ff6b6b;--acc:#fbbf24}
+*{box-sizing:border-box}body{margin:0;height:100vh;display:flex;flex-direction:column;font:14px system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--fg)}
+header{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+h1{font-size:15px;margin:0}label.btn,button{background:var(--fg);color:var(--bg);border:0;border-radius:6px;padding:6px 12px;cursor:pointer;font:inherit}
+button.s{background:transparent;color:var(--fg);border:1px solid var(--line)}input[type=file]{display:none}
+.ctl{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}.ctl input{width:110px}
+main{flex:1;display:flex;min-height:0}#wrap{flex:1;position:relative;min-width:0}canvas{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+#empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);pointer-events:none;padding:20px}
+aside{width:300px;overflow:auto;border-left:1px solid var(--line);background:var(--panel);padding:12px}
+h3{font-size:14px;margin:0 0 4px}h4{margin:12px 0 4px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.mu{color:var(--muted);font-size:12px}.r{display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:2px 0;border-bottom:1px dashed var(--line)}
+.p{color:var(--pos)}.n{color:var(--neg)}code{font-size:11px;word-break:break-all}#st{font-size:12px;color:var(--muted)}
+@media(max-width:760px){main{flex-direction:column}aside{width:auto;height:40%;border-left:0;border-top:1px solid var(--line)}}
+</style></head><body>
+<header><h1>PTH Network Visualizer</h1>
+<label class="btn">Open .pth / .pt<input id="f" type="file" accept=".pth,.pt,.bin,.ckpt"></label><button class="s" id="demo">Load demo</button><button class="s" id="fit">Fit view</button>
+<span class="ctl">Neurons/layer <input id="cap" type="range" min="4" max="96" value="24"><b id="capv">24</b></span>
+<span class="ctl">Strongest weights <input id="pct" type="range" min="2" max="100" value="60"><b id="pctv">60%</b></span>
+<span class="ctl">Input <input id="inp" type="text" placeholder="comma-separated, blank = random" style="width:200px"></span>
+<span class="ctl">Activation <select id="actf"><option value="relu">ReLU</option><option value="tanh">tanh</option><option value="sigmoid">sigmoid</option><option value="none">none</option></select></span>
+<button class="s" id="run">Run ▸</button><button class="s" id="clearRun">Clear</button>
+<span id="st">Drop a PyTorch checkpoint anywhere on the page.</span></header>
+<main><div id="wrap"><canvas id="cv"></canvas><div id="empty">Drop a .pth file here<br>(torch.save of a state_dict, PyTorch ≥ 1.6)<br>or click “Load demo”.</div></div>
+<aside><div id="info"></div><h4>Tensors</h4><div id="list" class="mu">—</div></aside></main>
+<script>
+const $=id=>document.getElementById(id),esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const GX=280,GY=30;let M=null,S={cols:[],all:[],edges:[],max:1,view:{x:0,y:0,k:1},hover:null,pin:null,
+ act:null,maxAct:null,litUpTo:-1,animLayer:null,animStart:0};
+const cv=$('cv'),ctx=cv.getContext('2d');
+/* ---------- minimal pickle VM (enough for torch.save state_dicts) ---------- */
+function unpickle(buf,loadPid){
+ const dv=new DataView(buf.buffer,buf.byteOffset,buf.byteLength),td=new TextDecoder();
+ let p=0,mi=0,st=[],marks=[],memo={};const G=n=>({__g:n}),top=()=>st[st.length-1];
+ const u8=()=>buf[p++],i32=()=>{const v=dv.getInt32(p,true);p+=4;return v},str=n=>{const s=td.decode(buf.subarray(p,p+n));p+=n;return s};
+ const line=()=>{const e=buf.indexOf(10,p),s=str(e-p);p++;return s},pm=()=>st.splice(marks.pop());
+ const red=(f,a)=>{const n=f.__g||'';
+  if(/_rebuild_tensor(_v2)?$/.test(n))return{t:1,s:a[0],off:a[1],size:a[2]};
+  if(/_rebuild_parameter/.test(n))return a[0];if(n==='collections.OrderedDict')return new Map();return{unk:n}};
+ for(;;){const op=u8();switch(op){
+  case 0x80:p++;break;case 0x95:p+=8;break;case 0x7d:st.push(new Map);break;case 0x5d:case 0x29:st.push([]);break;case 0x28:marks.push(st.length);break;
+  case 0x71:memo[u8()]=top();break;case 0x72:memo[i32()]=top();break;case 0x94:memo[mi++]=top();break;
+  case 0x68:st.push(memo[u8()]);break;case 0x6a:st.push(memo[i32()]);break;
+  case 0x58:st.push(str(i32()));break;case 0x8c:case 0x55:st.push(str(u8()));break;
+  case 0x63:{const m=line(),n=line();st.push(G(m+'.'+n));break}case 0x93:{const n=st.pop(),m=st.pop();st.push(G(m+'.'+n));break}
+  case 0x4a:st.push(i32());break;case 0x4b:st.push(u8());break;case 0x4d:st.push(dv.getUint16(p,true));p+=2;break;
+  case 0x8a:{const n=u8();let v=0;for(let i=0;i<n;i++)v+=buf[p+i]*2**(8*i);p+=n;st.push(v);break}
+  case 0x47:st.push(dv.getFloat64(p));p+=8;break;case 0x4e:st.push(null);break;case 0x88:st.push(true);break;case 0x89:st.push(false);break;
+  case 0x74:st.push(pm());break;case 0x85:st.push([st.pop()]);break;case 0x86:st.push(st.splice(-2));break;case 0x87:st.push(st.splice(-3));break;
+  case 0x52:{const a=st.pop(),f=st.pop();st.push(red(f,a));break}case 0x81:{const a=st.pop(),c=st.pop();st.push({unk:c.__g});break}
+  case 0x51:st.push(loadPid(st.pop()));break;
+  case 0x73:{const v=st.pop(),k=st.pop();top().set(k,v);break}
+  case 0x75:{const it=pm(),d=top();for(let i=0;i<it.length;i+=2)d.set(it[i],it[i+1]);break}
+  case 0x61:{const v=st.pop();top().push(v);break}case 0x65:{const it=pm();top().push(...it);break}
+  case 0x62:{const s=st.pop(),o=top();if(o&&typeof o==='object'&&!(o instanceof Map))o.state=s;break}case 0x30:st.pop();break;case 0x6c:st.push(pm());break;case 0x2e:return st.pop();
+  default:throw new Error('Unsupported pickle opcode 0x'+op.toString(16)+' (is this a full pickled model? save model.state_dict() instead)')}}}
+const f16=h=>{const s=h>>15?-1:1,e=(h>>10)&31,m=h&1023;return e==0?s*m*2**-24:e==31?(m?NaN:s*Infinity):s*(1+m/1024)*2**(e-15)};
+const bf=h=>new Float32Array(new Uint32Array([h<<16]).buffer)[0];
+function decode(t){const b=t.s.bytes,ty=t.s.st,n=t.size.reduce((a,c)=>a*c,1),dv=new DataView(b.buffer,b.byteOffset,b.byteLength);
+ const sz={FloatStorage:4,DoubleStorage:8,HalfStorage:2,BFloat16Storage:2,LongStorage:8,IntStorage:4,ShortStorage:2}[ty];if(!sz)throw new Error('Unsupported dtype '+ty);
+ const o=new Float32Array(n);for(let i=0;i<n;i++){const a=(t.off+i)*sz;o[i]=ty==='FloatStorage'?dv.getFloat32(a,true):ty==='DoubleStorage'?dv.getFloat64(a,true):ty==='HalfStorage'?f16(dv.getUint16(a,true)):ty==='BFloat16Storage'?bf(dv.getUint16(a,true)):ty==='LongStorage'?Number(dv.getBigInt64(a,true)):ty==='IntStorage'?dv.getInt32(a,true):dv.getInt16(a,true)}return o}
+function flat(o,pre,out){const s=o&&o.state;if(!(s instanceof Map))return;
+ for(const n of['_parameters','_buffers']){const m=s.get(n);if(m instanceof Map)for(const[k,v]of m)if(v&&v.t)out.set(pre+k,v)}
+ const m=s.get('_modules');if(m instanceof Map)for(const[k,v]of m)flat(v,pre+k+'.',out)}
+function extract(root){const cands=[],seen=new Set();
+ (function w(o){if(!o||typeof o!=='object'||seen.has(o))return;seen.add(o);
+  if(o.state instanceof Map&&(o.state.has('_modules')||o.state.has('_parameters'))){const m=new Map;flat(o,'',m);cands.push(m);return}
+  if(o instanceof Map){if([...o.values()].some(v=>v&&v.t))cands.push(o);for(const v of o.values())w(v)}})(root);
+ const sc=m=>[...m].filter(([k,v])=>v&&v.t&&v.size&&v.size.length>1&&/weight$/.test(k)).length;
+ return cands.sort((a,b)=>sc(b)-sc(a))[0]||null}
+async function readZip(buf){
+ const dv=new DataView(buf.buffer,buf.byteOffset,buf.byteLength),td=new TextDecoder(),F={},big=a=>Number(dv.getBigUint64(a,true));
+ const mk=(nm,m,cs,ds)=>{F[nm]=async()=>{const d=buf.subarray(ds,ds+cs);if(m===0)return d;
+  return new Uint8Array(await new Response(new Blob([d]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer())}};
+ let e=-1;for(let i=buf.length-22;i>=Math.max(0,buf.length-66000);i--)if(dv.getUint32(i,true)===0x06054b50){e=i;break}
+ try{if(e>=0){let n=dv.getUint16(e+10,true),o=dv.getUint32(e+16,true);
+  if((o===0xffffffff||n===0xffff)&&dv.getUint32(e-20,true)===0x07064b50){const z=big(e-12);n=big(z+32);o=big(z+48)}
+  for(let i=0;i<n&&o+46<=buf.length&&dv.getUint32(o,true)===0x02014b50;i++){
+   const m=dv.getUint16(o+10,true),nl=dv.getUint16(o+28,true),el=dv.getUint16(o+30,true),cl=dv.getUint16(o+32,true);
+   let cs=dv.getUint32(o+20,true),us=dv.getUint32(o+24,true),lh=dv.getUint32(o+42,true);const nm=td.decode(buf.subarray(o+46,o+46+nl));
+   for(let x=o+46+nl,end=x+el;x+4<=end;){const id=dv.getUint16(x,true),sz=dv.getUint16(x+2,true);
+    if(id===1){let y=x+4;if(us===0xffffffff){us=big(y);y+=8}if(cs===0xffffffff){cs=big(y);y+=8}if(lh===0xffffffff)lh=big(y)}x+=4+sz}
+   mk(nm,m,cs,lh+30+dv.getUint16(lh+26,true)+dv.getUint16(lh+28,true));o+=46+nl+el+cl}}}catch(_){}
+ if(!Object.keys(F).length)for(let o=0;o+30<=buf.length&&dv.getUint32(o,true)===0x04034b50;){ /* fallback: walk local headers */
+  const m=dv.getUint16(o+8,true),cs=dv.getUint32(o+18,true),nl=dv.getUint16(o+26,true),ds=o+30+nl+dv.getUint16(o+28,true);
+  mk(td.decode(buf.subarray(o+30,o+30+nl)),m,cs,ds);o=ds+cs}
+ if(!Object.keys(F).length)throw new Error('could not read archive (no zip entries found)');return F}
+async function loadFile(f){
+ status('Reading '+f.name+'…');
+ try{const z=await readZip(new Uint8Array(await f.arrayBuffer())),names=Object.keys(z),pk=names.find(n=>n.endsWith('data.pkl'));
+  if(!pk)throw new Error('Not a zip-based PyTorch file. Re-save it with torch.save (PyTorch ≥ 1.6).');
+  const pre=pk.slice(0,-8)+'data/',store={};
+  await Promise.all(names.filter(n=>n.startsWith(pre)&&!n.endsWith('/')).map(async n=>{store[n.slice(pre.length)]=await z[n]()}));
+  const root=unpickle(await z[pk](),p=>({st:String(p[1].__g).split('.').pop(),bytes:store[p[2]]}));
+  const sd=extract(root);if(!sd)throw new Error('No tensors found. Save with torch.save(model.state_dict(), path).');
+  for(const v of sd.values())if(v&&v.t&&v.s&&v.s.bytes)v.data=decode(v);
+  setSD(sd,f.name)}catch(e){const m=String(e.message);status('Error: '+(/central directory|zip/i.test(m)?'not a zip-format .pth (saved before PyTorch 1.6?). Re-save with torch.save(model.state_dict(), "m.pth"). ['+m+']':m));console.error(e)}}
+/* ---------- graph model ---------- */
+function buildModel(sd){const cols=[];
+ for(const[k,t]of sd){if(!t||!t.data||t.size.length<2||!/weight$/.test(k))continue;
+  const o=t.size[0],i=t.size[1],K=t.size.slice(2).reduce((a,c)=>a*c,1),d=t.data,b=sd.get(k.replace(/weight$/,'bias'));
+  if(!cols.length||cols[cols.length-1].n!==i)cols.push({name:'input',n:i});
+  const bias=b&&b.data&&b.data.length===o?b.data:null;
+  cols.push({name:k.replace(/\.weight$/,''),n:o,bias,bm:bias?Math.max(...bias.map(Math.abs))||1:1,W:K===1?(a,c)=>d[a*i+c]:(a,c)=>{let s=0;for(let q=0;q<K;q++)s+=d[(a*i+c)*K+q];return s/K}})}
+ return cols}
+function setSD(sd,label){M=buildModel(sd);if(!M.length){status('No weight matrices (2D+ tensors) found.');return}
+ $('empty').style.display='none';S.pin=S.hover=null;S.act=null;S.maxAct=null;S.litUpTo=-1;S.animLayer=null;
+ const mx=Math.max(...M.map(c=>c.n)),ne=M.reduce((a,c,l)=>a+(l&&c.W?c.n*M[l-1].n:0),0);
+ $('cap').max=Math.max(96,Math.min(512,mx));$('cap').value=Math.min(mx,512);$('capv').textContent=$('cap').value;
+ $('pct').value=ne<=60000?100:30;$('pctv').textContent=$('pct').value+'%';
+ $('list').innerHTML=[...sd].filter(([k,v])=>v&&v.size).map(([k,v])=>{let s='';if(v.data){let mn=1/0,mx=-1/0,sm=0;for(const x of v.data){if(x<mn)mn=x;if(x>mx)mx=x;sm+=x}s=`min ${mn.toFixed(3)} · max ${mx.toFixed(3)} · mean ${(sm/v.data.length).toFixed(3)}`}
+  return`<div class="r" style="display:block"><code>${esc(k)}</code> <b>[${v.size.join('×')}]</b><div class="mu">${s}</div></div>`}).join('');
+ const nw=M.filter(c=>c.W).length;status(`${label}: ${nw} weight layers, ${M.reduce((a,c)=>a+c.n,0)} neurons`);rebuild(false)}
+function rebuild(keep){if(!M)return;const cap=+$('cap').value,pct=+$('pct').value/100;
+ const cols=M.map(c=>({...c,m:Math.min(c.n,cap)})),all=[];
+ for(let l=1;l<cols.length;l++){const c=cols[l];if(!c.W)continue;for(let o=0;o<c.m;o++)for(let i=0;i<cols[l-1].m;i++)all.push({l,o,i,w:c.W(o,i)})}
+ const abs=all.map(e=>Math.abs(e.w)).sort((a,b)=>a-b),kp=Math.max(1,Math.ceil(all.length*pct)),thr=abs[abs.length-kp]||0;
+ Object.assign(S,{cols,all,edges:all.filter(e=>Math.abs(e.w)>=thr),max:abs[abs.length-1]||1});if(!keep)fit();refresh()}
+/* ---------- forward pass ---------- */
+const ACT={relu:x=>Math.max(0,x),tanh:Math.tanh,sigmoid:x=>1/(1+Math.exp(-x)),none:x=>x};
+function computeForward(input,actName){
+ const f=ACT[actName]||ACT.relu,acts=[],mx=[];
+ acts[0]=Float32Array.from({length:S.cols[0].n},(_,i)=>i<input.length?input[i]:0);
+ mx[0]=Math.max(1e-6,...acts[0].map(Math.abs));
+ for(let l=1;l<S.cols.length;l++){const c=S.cols[l];
+  if(!c.W){acts[l]=acts[l-1];mx[l]=mx[l-1];continue}
+  const prev=acts[l-1],iN=S.cols[l-1].n,o=c.n,out=new Float32Array(o);
+  for(let oi=0;oi<o;oi++){let s=c.bias?c.bias[oi]:0;for(let ii=0;ii<iN;ii++)s+=prev[ii]*c.W(oi,ii);out[oi]=s}
+  const last=l===S.cols.length-1;
+  acts[l]=last?out:out.map(f);mx[l]=Math.max(1e-6,...acts[l].map(Math.abs))}
+ return{acts,mx}}
+function parseInputText(txt,n){
+ const parts=txt.split(/[,\s]+/).filter(Boolean).map(Number);
+ if(parts.length&&!parts.some(isNaN))return parts;
+ return Array.from({length:n},()=>gauss()*.6)}
+function runForward(){
+ if(!M||!S.cols.length){status('Load a model first.');return}
+ const n=S.cols[0].n,input=parseInputText($('inp').value,n);
+ const r=computeForward(input,$('actf').value);
+ S.act=r.acts;S.maxAct=r.mx;S.litUpTo=0;S.animLayer=S.cols.length>1?1:null;S.animStart=performance.now();
+ status(`Forward pass: input×${n} → ${S.cols.map(c=>c.n).join('→')}`);
+ if(S.animLayer)requestAnimationFrame(animStep);else{S.litUpTo=S.cols.length-1;draw()}}
+function clearRun(){S.act=null;S.maxAct=null;S.litUpTo=-1;S.animLayer=null;draw()}
+const PULSE_MS=420,GAP_MS=110;
+function animStep(now){
+ if(S.animLayer==null)return;
+ const t=Math.min(1,(now-S.animStart)/PULSE_MS);
+ draw(t);
+ if(t<1){requestAnimationFrame(animStep);return}
+ S.litUpTo=S.animLayer;const next=S.animLayer+1;
+ if(next>=S.cols.length){S.animLayer=null;draw();return}
+ S.animLayer=next;setTimeout(()=>{S.animStart=performance.now();requestAnimationFrame(animStep)},GAP_MS)}
+/* ---------- rendering ---------- */
+const nx=l=>l*GX,ny=(l,j)=>(j-(S.cols[l].m-1)/2)*GY,css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function fit(){const r=cv.getBoundingClientRect(),n=S.cols.length;if(!n)return;const mm=Math.max(...S.cols.map(c=>c.m)),k=Math.min(1.2,(r.width-80)/((n-1)*GX+40),(r.height-110)/(mm*GY+60));S.view={k,x:r.width/2-((n-1)*GX/2)*k,y:r.height/2+15};draw()}
+function draw(pulseT){const r=cv.getBoundingClientRect(),d=devicePixelRatio||1;if(cv.width!==Math.round(r.width*d)){cv.width=Math.round(r.width*d);cv.height=Math.round(r.height*d)}
+ ctx.setTransform(d,0,0,d,0,0);ctx.clearRect(0,0,r.width,r.height);if(!S.cols.length)return;
+ const v=S.view,pos=css('--pos'),neg=css('--neg'),fg=css('--fg'),mu=css('--muted'),pn=css('--panel'),ac=css('--acc'),H=S.pin||S.hover;
+ ctx.translate(v.x,v.y);ctx.scale(v.k,v.k);
+ const B=[0,1].map(()=>[[],[],[],[]]);for(const e of S.edges)B[e.w>=0?0:1][Math.min(3,Math.floor(Math.abs(e.w)/S.max*4))].push(e);
+ const seg=e=>{ctx.moveTo(nx(e.l-1),ny(e.l-1,e.i));ctx.lineTo(nx(e.l),ny(e.l,e.o))};
+ for(let s=0;s<2;s++)for(let b=0;b<4;b++){ctx.beginPath();for(const e of B[s][b])seg(e);ctx.strokeStyle=s?neg:pos;ctx.globalAlpha=(H?.05:.12)+(H?.04:.16)*b;ctx.lineWidth=Math.max(.5+.6*b,.7/v.k);ctx.stroke()}
+ if(H){const hs=S.all.filter(e=>(e.l===H.l&&e.o===H.j)||(e.l===H.l+1&&e.i===H.j));
+  for(const e of hs){ctx.beginPath();seg(e);ctx.globalAlpha=.95;ctx.strokeStyle=e.w>=0?pos:neg;ctx.lineWidth=1+3.5*Math.abs(e.w)/S.max;ctx.stroke()}
+  if(v.k>.9){ctx.font='10px system-ui';ctx.textAlign='center';ctx.globalAlpha=1;ctx.fillStyle=fg;for(const e of hs){const t=(e.l===H.l)?.35:.65;ctx.fillText(e.w.toFixed(3),nx(e.l-1)+GX*t,ny(e.l-1,e.i)+(ny(e.l,e.o)-ny(e.l-1,e.i))*t-3)}}}
+ /* forward-pass signal: filled trail on already-lit edges, a traveling pulse on the edges currently firing */
+ if(S.act){
+  for(const e of S.edges){if(e.l>S.litUpTo)continue;
+   ctx.beginPath();seg(e);ctx.globalAlpha=.5+.4*Math.min(1,Math.abs(e.w)/S.max);ctx.strokeStyle=e.w>=0?pos:neg;
+   ctx.lineWidth=Math.max(1,2.2*Math.abs(e.w)/S.max);ctx.shadowColor=e.w>=0?pos:neg;ctx.shadowBlur=4;ctx.stroke();ctx.shadowBlur=0}
+  if(pulseT!=null&&S.animLayer!=null){for(const e of S.edges){if(e.l!==S.animLayer)continue;
+   const x0=nx(e.l-1),y0=ny(e.l-1,e.i),x1=nx(e.l),y1=ny(e.l,e.o),px=x0+(x1-x0)*pulseT,py=y0+(y1-y0)*pulseT,
+    col=e.w>=0?pos:neg,mag=Math.min(1,Math.abs(e.w)/S.max);
+   ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(px,py);ctx.globalAlpha=.55+.35*mag;ctx.strokeStyle=col;ctx.lineWidth=1+2.6*mag;ctx.stroke();
+   ctx.beginPath();ctx.arc(px,py,2.2+2.2*mag,0,7);ctx.fillStyle=col;ctx.globalAlpha=1;ctx.shadowColor=col;ctx.shadowBlur=10;ctx.fill();ctx.shadowBlur=0}}}
+ ctx.globalAlpha=1;ctx.textAlign='center';
+ const R=Math.min(14,Math.max(8,3.5/v.k));S.cols.forEach((c,l)=>{for(let j=0;j<c.m;j++){const x=nx(l),y=ny(l,j),hi=H&&H.l===l&&H.j===j,
+  lit=S.act&&l<=S.litUpTo;
+  ctx.beginPath();ctx.arc(x,y,hi?R+3:R,0,7);ctx.fillStyle=pn;ctx.fill();
+  if(lit){const av=S.act[l][j],am=Math.min(1,Math.abs(av)/(S.maxAct[l]||1));ctx.globalAlpha=.3+.7*am;ctx.fillStyle=av>=0?pos:neg;
+   if(am>.2){ctx.shadowColor=av>=0?pos:neg;ctx.shadowBlur=6+10*am}}
+  else if(c.bias){ctx.globalAlpha=.25+.75*Math.min(1,Math.abs(c.bias[j])/c.bm);ctx.fillStyle=c.bias[j]>=0?pos:neg}
+  else{ctx.globalAlpha=.4;ctx.fillStyle=mu}
+  ctx.fill();ctx.shadowBlur=0;ctx.globalAlpha=1;ctx.lineWidth=hi?3:1;ctx.strokeStyle=hi?ac:fg;ctx.stroke()}
+  ctx.fillStyle=fg;ctx.font='bold 12px system-ui';const ty=-(c.m-1)/2*GY-30;ctx.fillText(c.name,nx(l),ty);
+  ctx.fillStyle=mu;ctx.font='11px system-ui';ctx.fillText(c.m<c.n?`showing ${c.m} of ${c.n}`:`${c.n} neurons`,nx(l),ty+14)})}
+function info(H){const el=$('info');
+ if(!H){el.innerHTML='<p class="mu">Hover a neuron to see every weight touching it (labels appear on the edges when zoomed in). Click to pin. Scroll to zoom, drag to pan. Blue = positive, red = negative; node tint = bias — or, after a run, activation.</p><p class="mu">Type an input vector (or leave blank for random) and hit <b>Run</b> to watch it propagate layer by layer.</p>';return}
+ const c=S.cols[H.l],inc=S.all.filter(e=>e.l===H.l&&e.o===H.j),out=S.all.filter(e=>e.l===H.l+1&&e.i===H.j);
+ const row=(t,a,f)=>`<h4>${t}</h4>`+(a.length?a.slice().sort((x,y)=>Math.abs(y.w)-Math.abs(x.w)).slice(0,8).map(e=>`<div class="r"><span>${f(e)}</span><b class="${e.w<0?'n':'p'}">${e.w.toFixed(4)}</b></div>`).join(''):'<div class="mu">none</div>');
+ el.innerHTML=`<h3>${esc(c.name)} · neuron ${H.j}</h3><div class="mu">${c.bias?'bias '+c.bias[H.j].toFixed(4):'no bias'}</div>`+row(`Incoming (${inc.length}) top 8`,inc,e=>`from ${esc(S.cols[e.l-1].name)}[${e.i}]`)+row(`Outgoing (${out.length}) top 8`,out,e=>`to ${esc(S.cols[e.l].name)}[${e.o}]`)}
+const refresh=()=>{info(S.pin||S.hover);draw()},status=t=>$('st').textContent=t;
+/* ---------- interaction ---------- */
+function hit(e){const r=cv.getBoundingClientRect(),v=S.view,wx=(e.clientX-r.left-v.x)/v.k,wy=(e.clientY-r.top-v.y)/v.k;
+ const tl=Math.max(14,10/v.k);for(let l=0;l<S.cols.length;l++){if(Math.abs(wx-nx(l))>tl)continue;const m=S.cols[l].m,j=Math.round(wy/GY+(m-1)/2);if(j>=0&&j<m&&Math.abs(wy-ny(l,j))<tl)return{l,j}}return null}
+const same=(a,b)=>a===b||(a&&b&&a.l===b.l&&a.j===b.j);let drag=null;
+cv.onpointerdown=e=>{cv.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,vx:S.view.x,vy:S.view.y,mv:0}};
+cv.onpointermove=e=>{if(drag){const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.mv=Math.max(drag.mv,Math.abs(dx)+Math.abs(dy));if(drag.mv>4){S.view.x=drag.vx+dx;S.view.y=drag.vy+dy;draw();return}}
+ const h=hit(e);if(!same(h,S.hover)){S.hover=h;refresh()}};
+cv.onpointerup=e=>{if(drag&&drag.mv<=4){const h=hit(e);S.pin=same(h,S.pin)?null:h;refresh()}drag=null};
+cv.addEventListener('wheel',e=>{e.preventDefault();const r=cv.getBoundingClientRect(),px=e.clientX-r.left,py=e.clientY-r.top,v=S.view,k=Math.min(10,Math.max(.05,v.k*Math.exp(-e.deltaY*.0015)));v.x=px-(px-v.x)*k/v.k;v.y=py-(py-v.y)*k/v.k;v.k=k;draw()},{passive:false});
+$('f').onchange=e=>{const f=e.target.files[0];e.target.value='';f&&loadFile(f)};$('fit').onclick=fit;
+$('cap').oninput=e=>{$('capv').textContent=e.target.value;rebuild(true)};$('pct').oninput=e=>{$('pctv').textContent=e.target.value+'%';rebuild(true)};
+$('run').onclick=runForward;$('clearRun').onclick=clearRun;
+$('inp').addEventListener('keydown',e=>{if(e.key==='Enter')runForward()});
+addEventListener('dragover',e=>e.preventDefault());addEventListener('drop',e=>{e.preventDefault();e.dataTransfer.files[0]&&loadFile(e.dataTransfer.files[0])});addEventListener('resize',draw);
+function gauss(){let u=0;while(!u)u=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(6.2832*Math.random())}
+function demo(){const g=gauss;
+ const T=(...s)=>({t:1,size:s,data:Float32Array.from({length:s.reduce((a,c)=>a*c,1)},()=>g()*.6)});
+ setSD(new Map([['fc1.weight',T(8,4)],['fc1.bias',T(8)],['fc2.weight',T(6,8)],['fc2.bias',T(6)],['fc3.weight',T(3,6)],['fc3.bias',T(3)]]),'Demo MLP 4→8→6→3')}
+$('demo').onclick=demo;info(null);
+</script></body></html>
